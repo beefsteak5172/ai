@@ -7467,49 +7467,16 @@ async function loadConfigFromKV(){
   }
 }
 
-// 在 App 初始化前攔截，先等 KV 載入完畢
-// 圖片太大不存 localStorage，改由記憶體 window._kvMenuFull 直接供 App 使用
-(function(){
-  var _sessionKey='_kvSynced';
-  if(sessionStorage.getItem(_sessionKey)){
-    console.log('[Worker] KV already synced this session');
-    return;
-  }
-  var mask=document.createElement('div');
-  mask.id='_kvMask';
-  mask.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:#fff;z-index:99999;display:flex;align-items:center;justify-content:center;';
-  mask.innerHTML='<div style="font-size:18px;color:#666;">載入菜單中...</div>';
-  document.documentElement.appendChild(mask);
-
-  loadConfigFromKV().then(function(changed){
-    sessionStorage.setItem(_sessionKey,'1');
-    // 攔截 localStorage.getItem，讓 App 讀菜單時拿到含圖片的完整版
-    var _origGetItem=localStorage.getItem.bind(localStorage);
-    localStorage.getItem=function(k){
-      if(k==='menuConfig'&&window._kvMenuFull&&window._kvMenuFull.length>0){
-        return JSON.stringify(window._kvMenuFull);
-      }
-      if(k==='addonsConfig'&&window._kvAddonsFull&&window._kvAddonsFull.length>0){
-        return JSON.stringify(window._kvAddonsFull);
-      }
-      if(k==='optionsConfig'&&window._kvOptionsFull&&window._kvOptionsFull.length>0){
-        return JSON.stringify(window._kvOptionsFull);
-      }
-      return _origGetItem(k);
-    };
-    console.log('[Worker] localStorage patched with KV data (images in memory)');
-    // 移除遮罩，讓 App 正常初始化（此時 getItem 已回傳 KV 資料）
-    var m=document.getElementById('_kvMask');
-    if(m)m.parentNode.removeChild(m);
-  });
-})();
+// idb + IndexedDB 寫入在 DOMContentLoaded 後執行（見下方）
 
 document.addEventListener('DOMContentLoaded',function(){
   setTimeout(function(){
-    if(typeof apiService==='undefined'){
-      console.warn('[Worker] apiService not found');
+    if(typeof apiService==='undefined'||typeof idb==='undefined'||typeof STORES==='undefined'){
+      console.warn('[Worker] apiService or idb not found');
       return;
     }
+
+    // patch apiService methods for KV sync
     var os=apiService.submitOrder.bind(apiService);
     var ou=apiService.updateOrderStatus.bind(apiService);
     var om=apiService.saveMenuConfig.bind(apiService);
@@ -7532,17 +7499,77 @@ document.addEventListener('DOMContentLoaded',function(){
 
     console.log('[Worker] apiService patched - backup enabled');
 
-    // Auto-backup every 10 minutes
+    // 從 KV 載入菜單，直接寫入 IndexedDB，再觸發 App 重新初始化
+    loadConfigFromKV().then(function(){
+      if(!window._kvMenuFull||window._kvMenuFull.length===0){
+        console.warn('[Worker] No KV menu data, keeping current');
+        return;
+      }
+      var writes=[];
+      writes.push(idb.set(STORES.MENU,'current',window._kvMenuFull));
+      if(window._kvAddonsFull&&window._kvAddonsFull.length>0)
+        writes.push(idb.set(STORES.ADDONS,'current',window._kvAddonsFull));
+      if(window._kvOptionsFull&&window._kvOptionsFull.length>0)
+        writes.push(idb.set(STORES.OPTIONS,'current',window._kvOptionsFull));
+      Promise.all(writes).then(function(){
+        apiService.init().then(function(){
+          console.log('[Worker] KV menu written to IndexedDB, App refreshed');
+        });
+      }).catch(function(e){
+        console.warn('[Worker] IndexedDB write failed:',e.message);
+      });
+    });
+
+    // Auto-backup every 10 minutes (from IndexedDB)
     setInterval(function(){
       try{
-        var data={};
-        for(var k in localStorage){
-          if(localStorage.hasOwnProperty(k))data[k]=localStorage.getItem(k);
-        }
-        cw('/api/backup',{data:data});
-        console.log('[Worker] Auto-backup sent');
+        apiService.getRawConfig().then(function(cfg){
+          cw('/api/backup',{data:{menu:cfg.menu,addons:cfg.addons,options:cfg.options}});
+          console.log('[Worker] Auto-backup sent');
+        });
       }catch(e){}
     },10*60*1000);
+
+    // 每2分鐘從 KV 輪詢最新菜單，若有更新則自動同步到 IndexedDB
+    // 確保所有裝置都能即時看到最新菜單
+    var _lastMenuHash='';
+    function pollKVMenu(){
+      fetch(WU+'/api/config/get',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+        .then(function(r){return r.json();})
+        .then(function(data){
+          if(!data.ok||!data.menu||data.menu.length===0)return;
+          // 用菜單長度+第一項名稱做簡易 hash 判斷是否有變化
+          var hash=data.menu.length+'|'+(data.menu[0]&&data.menu[0].title||'')+'|'+
+                   (data.menu[0]&&data.menu[0].items&&data.menu[0].items.length||0);
+          if(hash===_lastMenuHash){
+            console.log('[Worker] Poll: menu unchanged');
+            return;
+          }
+          _lastMenuHash=hash;
+          // 有變化，寫入 IndexedDB 並重新初始化
+          var writes=[];
+          writes.push(idb.set(STORES.MENU,'current',data.menu));
+          if(data.addons&&data.addons.length>0)
+            writes.push(idb.set(STORES.ADDONS,'current',data.addons));
+          if(data.options&&data.options.length>0)
+            writes.push(idb.set(STORES.OPTIONS,'current',data.options));
+          Promise.all(writes).then(function(){
+            apiService.init().then(function(){
+              console.log('[Worker] Poll: menu updated from KV');
+            });
+          });
+        })
+        .catch(function(e){console.warn('[Worker] Poll failed:',e.message);});
+    }
+    // 啟動後先記錄初始 hash，之後每2分鐘輪詢
+    apiService.getRawConfig().then(function(cfg){
+      if(cfg.menu&&cfg.menu.length>0){
+        _lastMenuHash=cfg.menu.length+'|'+(cfg.menu[0]&&cfg.menu[0].title||'')+'|'+
+                      (cfg.menu[0]&&cfg.menu[0].items&&cfg.menu[0].items.length||0);
+      }
+    });
+    setInterval(pollKVMenu, 2*60*1000);
+    console.log('[Worker] KV polling every 2 min enabled');
 
   },500);
 });
