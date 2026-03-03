@@ -7367,116 +7367,83 @@
         ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
     </script>
 <script>
-// Auth Guard + Login + Worker API
+// Worker API - KV sync + background backup
 var WU='https://tmenu-server.toastit2016.workers.dev';
-var TK='tmenu_token';
-var TU='tmenu_user';
 
-async function cw(path,data,token){
+async function cw(path,data){
   try{
-    var h={'Content-Type':'application/json'};
-    if(token)h['X-Auth-Token']=token;
-    var r=await fetch(WU+path,{method:'POST',headers:h,body:JSON.stringify(data||{})});
+    var r=await fetch(WU+path,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(data||{})
+    });
     return await r.json();
   }catch(e){return{ok:false,error:e.message};}
 }
 
-function showLogin(err){
-  var root=document.getElementById('root');
-  if(root)root.style.display='none';
-  var old=document.getElementById('tl');
-  if(old)old.remove();
-  var d=document.createElement('div');
-  d.id='tl';
-  d.style.cssText='position:fixed;inset:0;background:linear-gradient(135deg,#0f172a,#1e3a5f);display:flex;align-items:center;justify-content:center;z-index:999999;font-family:system-ui,sans-serif;';
-  d.innerHTML='\
-<div style="background:#fff;border-radius:1.5rem;padding:2.5rem;width:340px;box-shadow:0 30px 60px rgba(0,0,0,0.5);text-align:center;">'\
-+'<div style="font-size:2.5rem;margin-bottom:0.5rem;">&#x1F354;</div>'\
-+'<h2 style="font-size:1.4rem;font-weight:900;color:#1e293b;margin:0 0 0.25rem;">tmenu POS</h2>'\
-+'<p style="color:#64748b;font-size:0.85rem;margin:0 0 1.5rem;">Please sign in to continue</p>'\
-+(err?'<div style="background:#fef2f2;color:#dc2626;padding:0.75rem;border-radius:0.6rem;font-size:0.85rem;margin-bottom:1rem;">'+err+'</div>':'')\
-+'<input id="tlu" type="text" placeholder="Username" style="width:100%;padding:0.85rem;border:2px solid #e2e8f0;border-radius:0.75rem;font-size:0.95rem;margin-bottom:0.75rem;box-sizing:border-box;"/>'\
-+'<input id="tlp" type="password" placeholder="Password" style="width:100%;padding:0.85rem;border:2px solid #e2e8f0;border-radius:0.75rem;font-size:0.95rem;margin-bottom:1.25rem;box-sizing:border-box;"/>'\
-+'<button id="tlb" style="width:100%;padding:0.9rem;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;border-radius:0.75rem;font-size:1rem;font-weight:700;cursor:pointer;transition:opacity 0.2s;">Sign In</button>'\
-+'</div>';
-  document.body.appendChild(d);
+// 啟動時從 KV 載入菜單，存入 localStorage
+async function loadConfigFromKV(){
+  try{
+    var r=await fetch(WU+'/api/config/get',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    var data=await r.json();
+    if(data.ok){
+      if(data.menu)localStorage.setItem('menuConfig',JSON.stringify(data.menu));
+      if(data.addons)localStorage.setItem('addonsConfig',JSON.stringify(data.addons));
+      if(data.options)localStorage.setItem('optionsConfig',JSON.stringify(data.options));
+      console.log('[Worker] Config loaded from KV');
+    }else{
+      console.warn('[Worker] No config in KV, using localStorage');
+    }
+  }catch(e){
+    console.warn('[Worker] KV load failed, using localStorage:', e.message);
+  }
+}
+
+// 先從 KV 載入，再啟動 app
+loadConfigFromKV();
+
+document.addEventListener('DOMContentLoaded',function(){
   setTimeout(function(){
-    var b=document.getElementById('tlb');
-    var p=document.getElementById('tlp');
-    var u=document.getElementById('tlu');
-    if(b)b.onclick=doLogin;
-    if(p)p.onkeydown=function(e){if(e.key==='Enter')doLogin();};
-    if(u){u.onkeydown=function(e){if(e.key==='Enter')document.getElementById('tlp').focus();};u.focus();}
-  },50);
-}
+    if(typeof apiService==='undefined'){
+      console.warn('[Worker] apiService not found');
+      return;
+    }
+    var os=apiService.submitOrder.bind(apiService);
+    var ou=apiService.updateOrderStatus.bind(apiService);
+    var om=apiService.saveMenuConfig.bind(apiService);
 
-async function doLogin(){
-  var b=document.getElementById('tlb');
-  var u=(document.getElementById('tlu').value||'').trim();
-  var p=(document.getElementById('tlp').value||'').trim();
-  if(!u||!p){showLogin('Please enter username and password');return;}
-  if(b){b.textContent='Signing in...';b.disabled=true;}
-  var r=await cw('/api/auth/login',{username:u,password:p});
-  if(r.ok&&r.token){
-    localStorage.setItem(TK,r.token);
-    localStorage.setItem(TU,JSON.stringify({username:r.username,role:r.role,store:r.store}));
-    var ld=document.getElementById('tl');
-    if(ld)ld.remove();
-    var root=document.getElementById('root');
-    if(root)root.style.display='';
-    patch(r.token);
-    console.log('[Auth] Logged in:',r.username,'['+r.role+']');
-  }else{
-    showLogin(r.error||'Login failed');
-  }
-}
+    apiService.submitOrder=async function(d){
+      var r=await os(d);
+      cw('/api/order',{action:'submit',order:d});
+      return r;
+    };
+    apiService.updateOrderStatus=async function(id,s){
+      var r=await ou(id,s);
+      cw('/api/order',{action:'updateStatus',id:id,status:s});
+      return r;
+    };
+    apiService.saveMenuConfig=async function(m,a,o,mt){
+      var r=await om(m,a,o,mt);
+      cw('/api/config',{action:'saveMenu',menu:m,addons:a,options:o});
+      return r;
+    };
 
-function patch(token){
-  if(typeof apiService==='undefined'){setTimeout(function(){patch(token);},300);return;}
-  var os=apiService.submitOrder.bind(apiService);
-  var ou=apiService.updateOrderStatus.bind(apiService);
-  var om=apiService.saveMenuConfig.bind(apiService);
-  apiService.submitOrder=async function(d){
-    var r=await os(d);
-    cw('/api/order',{action:'submit',order:d},token);
-    return r;
-  };
-  apiService.updateOrderStatus=async function(id,status){
-    var r=await ou(id,status);
-    cw('/api/order',{action:'updateStatus',id:id,status:status},token);
-    return r;
-  };
-  apiService.saveMenuConfig=async function(m,a,o,mt){
-    var r=await om(m,a,o,mt);
-    cw('/api/config',{action:'saveMenu',menu:m,addons:a,options:o},token);
-    return r;
-  };
-  console.log('[Auth] apiService patched');
-  // Periodic backup every 10 minutes
-  setInterval(function(){
-    try{
-      var data={};
-      for(var k in localStorage){if(localStorage.hasOwnProperty(k))data[k]=localStorage.getItem(k);}
-      cw('/api/backup',{data:data},token);
-      console.log('[Backup] Auto-backup sent');
-    }catch(e){}
-  }, 10*60*1000);
-}
+    console.log('[Worker] apiService patched - backup enabled');
 
-// ---- Auth Guard ----
-(async function(){
-  var token=localStorage.getItem(TK);
-  if(!token){showLogin();return;}
-  var r=await cw('/api/auth/verify',{},token);
-  if(r.ok){
-    console.log('[Auth] Token valid:',r.username);
-    patch(token);
-  }else{
-    localStorage.removeItem(TK);
-    localStorage.removeItem(TU);
-    showLogin('Session expired, please sign in again');
-  }
-})();
+    // Auto-backup every 10 minutes
+    setInterval(function(){
+      try{
+        var data={};
+        for(var k in localStorage){
+          if(localStorage.hasOwnProperty(k))data[k]=localStorage.getItem(k);
+        }
+        cw('/api/backup',{data:data});
+        console.log('[Worker] Auto-backup sent');
+      }catch(e){}
+    },10*60*1000);
+
+  },500);
+});
 </script>
 </body>
 </html>
