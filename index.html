@@ -7367,7 +7367,7 @@
         ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
     </script>
 <script>
-// Worker API - background backup
+// Worker API - KV sync + background backup
 var WU='https://tmenu-server.toastit2016.workers.dev';
 
 async function cw(path,data){
@@ -7380,6 +7380,27 @@ async function cw(path,data){
     return await r.json();
   }catch(e){return{ok:false,error:e.message};}
 }
+
+// 啟動時從 KV 載入菜單，存入 localStorage
+async function loadConfigFromKV(){
+  try{
+    var r=await fetch(WU+'/api/config/get',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    var data=await r.json();
+    if(data.ok){
+      if(data.menu)localStorage.setItem('menuConfig',JSON.stringify(data.menu));
+      if(data.addons)localStorage.setItem('addonsConfig',JSON.stringify(data.addons));
+      if(data.options)localStorage.setItem('optionsConfig',JSON.stringify(data.options));
+      console.log('[Worker] Config loaded from KV');
+    }else{
+      console.warn('[Worker] No config in KV, using localStorage');
+    }
+  }catch(e){
+    console.warn('[Worker] KV load failed, using localStorage:', e.message);
+  }
+}
+
+// 先從 KV 載入，再啟動 app
+loadConfigFromKV();
 
 document.addEventListener('DOMContentLoaded',function(){
   setTimeout(function(){
@@ -7409,6 +7430,7 @@ document.addEventListener('DOMContentLoaded',function(){
 
     console.log('[Worker] apiService patched - backup enabled');
 
+    // Auto-backup every 10 minutes
     setInterval(function(){
       try{
         var data={};
