@@ -7369,6 +7369,7 @@
 <script>
 // Worker API - KV sync + background backup
 var WU='https://tmenu-server.toastit2016.workers.dev';
+var _kvLoaded=false;
 
 async function cw(path,data){
   try{
@@ -7381,26 +7382,67 @@ async function cw(path,data){
   }catch(e){return{ok:false,error:e.message};}
 }
 
-// 啟動時從 KV 載入菜單，存入 localStorage
+// 從 KV 載入菜單，若有新資料則更新 localStorage 並回傳 true
 async function loadConfigFromKV(){
   try{
     var r=await fetch(WU+'/api/config/get',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     var data=await r.json();
     if(data.ok){
-      if(data.menu)localStorage.setItem('menuConfig',JSON.stringify(data.menu));
-      if(data.addons)localStorage.setItem('addonsConfig',JSON.stringify(data.addons));
-      if(data.options)localStorage.setItem('optionsConfig',JSON.stringify(data.options));
-      console.log('[Worker] Config loaded from KV');
+      var changed=false;
+      if(data.menu&&data.menu.length>0){
+        var newVal=JSON.stringify(data.menu);
+        if(localStorage.getItem('menuConfig')!==newVal){localStorage.setItem('menuConfig',newVal);changed=true;}
+      }
+      if(data.addons&&data.addons.length>0){
+        var newVal=JSON.stringify(data.addons);
+        if(localStorage.getItem('addonsConfig')!==newVal){localStorage.setItem('addonsConfig',newVal);changed=true;}
+      }
+      if(data.options&&data.options.length>0){
+        var newVal=JSON.stringify(data.options);
+        if(localStorage.getItem('optionsConfig')!==newVal){localStorage.setItem('optionsConfig',newVal);changed=true;}
+      }
+      if(changed){console.log('[Worker] Config updated from KV');}
+      else{console.log('[Worker] Config unchanged');}
+      return changed;
     }else{
       console.warn('[Worker] No config in KV, using localStorage');
+      return false;
     }
   }catch(e){
     console.warn('[Worker] KV load failed, using localStorage:', e.message);
+    return false;
   }
 }
 
-// 先從 KV 載入，再啟動 app
-loadConfigFromKV();
+// 在 App 初始化前攔截，先等 KV 載入完畢
+// 若 KV 有新資料 → reload 頁面讓 App 讀到最新 localStorage
+(function(){
+  var _sessionKey='_kvSynced';
+  // 每次開頁面只 reload 一次，避免無限迴圈
+  if(sessionStorage.getItem(_sessionKey)){
+    console.log('[Worker] KV already synced this session');
+    return;
+  }
+  // 凍結頁面渲染：在 <html> 加上隱藏層，等 KV 回來再移除
+  var mask=document.createElement('div');
+  mask.id='_kvMask';
+  mask.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:#fff;z-index:99999;display:flex;align-items:center;justify-content:center;';
+  mask.innerHTML='<div style="font-size:18px;color:#666;">載入菜單中...</div>';
+  document.documentElement.appendChild(mask);
+
+  loadConfigFromKV().then(function(changed){
+    sessionStorage.setItem(_sessionKey,'1');
+    if(changed){
+      // 有新資料，reload 讓 App 讀到最新 localStorage
+      console.log('[Worker] Reloading to apply new config...');
+      location.reload();
+    }else{
+      // 無變化，移除遮罩，繼續正常渲染
+      var m=document.getElementById('_kvMask');
+      if(m)m.parentNode.removeChild(m);
+    }
+  });
+})();
 
 document.addEventListener('DOMContentLoaded',function(){
   setTimeout(function(){
