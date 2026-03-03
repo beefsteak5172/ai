@@ -7383,6 +7383,43 @@ async function cw(path,data){
 }
 
 // 從 KV 載入菜單，若有新資料則更新 localStorage 並回傳 true
+// 圖片(base64)太大不存 localStorage，改存在記憶體變數供 App 直接使用
+window._kvImages={};
+
+function stripImages(menu){
+  // 移除 base64 圖片，改存到記憶體，localStorage 只存文字資料
+  if(!Array.isArray(menu))return menu;
+  return menu.map(function(cat){
+    var c=JSON.parse(JSON.stringify(cat));
+    if(c.items&&Array.isArray(c.items)){
+      c.items=c.items.map(function(item){
+        var it=JSON.parse(JSON.stringify(item));
+        if(it.image&&it.image.length>500){
+          window._kvImages[it.id]=it.image;
+          it.image='__KV__';
+        }
+        return it;
+      });
+    }
+    return c;
+  });
+}
+
+function restoreImages(menu){
+  if(!Array.isArray(menu))return menu;
+  return menu.map(function(cat){
+    if(cat.items&&Array.isArray(cat.items)){
+      cat.items=cat.items.map(function(item){
+        if(item.image==='__KV__'&&window._kvImages[item.id]){
+          item.image=window._kvImages[item.id];
+        }
+        return item;
+      });
+    }
+    return cat;
+  });
+}
+
 async function loadConfigFromKV(){
   try{
     var r=await fetch(WU+'/api/config/get',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
@@ -7390,19 +7427,35 @@ async function loadConfigFromKV(){
     if(data.ok){
       var changed=false;
       if(data.menu&&data.menu.length>0){
-        var newVal=JSON.stringify(data.menu);
-        if(localStorage.getItem('menuConfig')!==newVal){localStorage.setItem('menuConfig',newVal);changed=true;}
+        // 先把圖片存到記憶體，再把無圖版存 localStorage
+        var menuNoImg=stripImages(data.menu);
+        var newVal=JSON.stringify(menuNoImg);
+        try{
+          if(localStorage.getItem('menuConfig')!==newVal){localStorage.setItem('menuConfig',newVal);changed=true;}
+        }catch(qe){
+          // quota exceeded: 清掉舊資料再試
+          try{localStorage.removeItem('menuConfig');localStorage.setItem('menuConfig',newVal);changed=true;}
+          catch(qe2){console.warn('[Worker] localStorage full, using memory only');changed=true;}
+        }
       }
       if(data.addons&&data.addons.length>0){
         var newVal=JSON.stringify(data.addons);
-        if(localStorage.getItem('addonsConfig')!==newVal){localStorage.setItem('addonsConfig',newVal);changed=true;}
+        try{
+          if(localStorage.getItem('addonsConfig')!==newVal){localStorage.setItem('addonsConfig',newVal);changed=true;}
+        }catch(qe){try{localStorage.removeItem('addonsConfig');localStorage.setItem('addonsConfig',newVal);}catch(e){}}
       }
       if(data.options&&data.options.length>0){
         var newVal=JSON.stringify(data.options);
-        if(localStorage.getItem('optionsConfig')!==newVal){localStorage.setItem('optionsConfig',newVal);changed=true;}
+        try{
+          if(localStorage.getItem('optionsConfig')!==newVal){localStorage.setItem('optionsConfig',newVal);changed=true;}
+        }catch(qe){try{localStorage.removeItem('optionsConfig');localStorage.setItem('optionsConfig',newVal);}catch(e){}}
       }
+      // 把完整含圖片的菜單存在記憶體，供 App 直接取用
+      window._kvMenuFull=data.menu;
+      window._kvAddonsFull=data.addons;
+      window._kvOptionsFull=data.options;
       if(changed){console.log('[Worker] Config updated from KV');}
-      else{console.log('[Worker] Config unchanged');}
+      else{console.log('[Worker] Config unchanged, images in memory');}
       return changed;
     }else{
       console.warn('[Worker] No config in KV, using localStorage');
@@ -7415,15 +7468,13 @@ async function loadConfigFromKV(){
 }
 
 // 在 App 初始化前攔截，先等 KV 載入完畢
-// 若 KV 有新資料 → reload 頁面讓 App 讀到最新 localStorage
+// 圖片太大不存 localStorage，改由記憶體 window._kvMenuFull 直接供 App 使用
 (function(){
   var _sessionKey='_kvSynced';
-  // 每次開頁面只 reload 一次，避免無限迴圈
   if(sessionStorage.getItem(_sessionKey)){
     console.log('[Worker] KV already synced this session');
     return;
   }
-  // 凍結頁面渲染：在 <html> 加上隱藏層，等 KV 回來再移除
   var mask=document.createElement('div');
   mask.id='_kvMask';
   mask.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:#fff;z-index:99999;display:flex;align-items:center;justify-content:center;';
@@ -7432,15 +7483,24 @@ async function loadConfigFromKV(){
 
   loadConfigFromKV().then(function(changed){
     sessionStorage.setItem(_sessionKey,'1');
-    if(changed){
-      // 有新資料，reload 讓 App 讀到最新 localStorage
-      console.log('[Worker] Reloading to apply new config...');
-      location.reload();
-    }else{
-      // 無變化，移除遮罩，繼續正常渲染
-      var m=document.getElementById('_kvMask');
-      if(m)m.parentNode.removeChild(m);
-    }
+    // 攔截 localStorage.getItem，讓 App 讀菜單時拿到含圖片的完整版
+    var _origGetItem=localStorage.getItem.bind(localStorage);
+    localStorage.getItem=function(k){
+      if(k==='menuConfig'&&window._kvMenuFull&&window._kvMenuFull.length>0){
+        return JSON.stringify(window._kvMenuFull);
+      }
+      if(k==='addonsConfig'&&window._kvAddonsFull&&window._kvAddonsFull.length>0){
+        return JSON.stringify(window._kvAddonsFull);
+      }
+      if(k==='optionsConfig'&&window._kvOptionsFull&&window._kvOptionsFull.length>0){
+        return JSON.stringify(window._kvOptionsFull);
+      }
+      return _origGetItem(k);
+    };
+    console.log('[Worker] localStorage patched with KV data (images in memory)');
+    // 移除遮罩，讓 App 正常初始化（此時 getItem 已回傳 KV 資料）
+    var m=document.getElementById('_kvMask');
+    if(m)m.parentNode.removeChild(m);
   });
 })();
 
