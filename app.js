@@ -5238,8 +5238,7 @@
                             
                             return React.createElement('section', {
                                 key: groupKey,
-                                className: "w-full flex-shrink-0 p-6 overflow-y-auto custom-scrollbar flex flex-col items-center"
-                            },
+className: "w-full flex-shrink-0 p-6 overflow-y-auto custom-scrollbar flex flex-col items-center"                            },
                                 React.createElement('div', { className: "max-w-[85%] w-full space-y-8" },
                                     // 標題和控制按鈕
                                     React.createElement('div', { className: "flex items-center justify-between" },
@@ -5307,7 +5306,7 @@
                                                 // 中間：文字和數量（字縮50%）
                                                 React.createElement('div', { className: "flex-1 flex flex-col items-center justify-center gap-0.5 px-1 min-w-0" },
                                                     React.createElement('p', { 
-                                                        className: "text-[0.72rem] font-black text-white text-center leading-tight break-keep",
+                                                        className: "text-[2.2rem] font-black text-white text-center leading-tight break-keep",
                                                         style: { wordBreak: 'keep-all', overflowWrap: 'normal' }
                                                     }, option.name),
                                                     option.price && option.price > 0 && React.createElement('p', {
