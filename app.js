@@ -5376,33 +5376,33 @@ className: "w-full flex-shrink-0 p-6 overflow-y-auto custom-scrollbar flex flex-
                                 React.createElement('h2', { 
                                     className: "text-xl font-black text-white italic tracking-tighter uppercase drop-shadow-2xl text-center" 
                                 }, '✨ 加購'),
-                                React.createElement('div', { className: "grid grid-cols-4 gap-5" },
+                                React.createElement('div', { className: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3" },
                                     addons.filter(a => !a.isHidden && a.isAvailable !== false).slice(0, 6).map(addon => {
                                         const selectedAddon = selectedAddons.find(sa => sa.id === addon.id);
                                         const currentQuantity = selectedAddon?.quantity || 0;
                                         return React.createElement('div', {
                                             key: addon.id,
-                                            className: `p-5 rounded-xl border-4 transition-all ${
-                                                currentQuantity > 0
-                                                    ? 'border-green-500 bg-green-900/50 shadow-2xl'
-                                                    : 'border-slate-700 bg-slate-800/50'
+    className: `p-5 rounded-xl border-4 transition-all ${
+        currentQuantity > 0
+            ? 'border-green-500 bg-green-900/50 shadow-2xl'
+            : 'border-slate-700 bg-slate-800/50'
                                             }`
                                         },
                                             // 加購名稱 - 再縮小50%（從 text-2xl 改為 text-xl）
-                                            React.createElement('p', { className: "text-xl font-black text-white mb-2" }, addon.name),
+                                            React.createElement('p', { className: "text-xl font-black text-white mb-1" }, addon.name),
                                             // 價格 - 縮小20%（從 text-4xl 改為 text-3xl）
                                             React.createElement('p', { className: "text-3xl font-bold text-yellow-400 mb-5" }, `+$${addon.price}`),
                                             React.createElement('div', { className: "flex items-center justify-center gap-4" },
                                                 React.createElement('button', {
                                                     onClick: () => updateAddonQuantity(addon, -1),
-                                                    className: "w-16 h-16 rounded-full bg-white/20 text-white flex items-center justify-center active:scale-90 transition-transform hover:bg-rose-500"
+                                                    className: "w-12 h-12 rounded-full bg-white/20 text-white flex items-center justify-center active:scale-90 transition-transform hover:bg-rose-500"
                                                 }, React.createElement(MinusIcon, { className: "w-8 h-8 stroke-[3]" })),
                                                 React.createElement('span', { 
                                                     className: "text-5xl font-black text-yellow-400 font-mono min-w-[80px] text-center" 
                                                 }, currentQuantity),
                                                 React.createElement('button', {
                                                     onClick: () => updateAddonQuantity(addon, 1),
-                                                    className: "w-16 h-16 rounded-full bg-yellow-400 text-slate-900 flex items-center justify-center active:scale-90 transition-transform hover:bg-yellow-300"
+                                                    className: "w-12 h-12 rounded-full bg-yellow-400 text-slate-900 flex items-center justify-center active:scale-90 transition-transform hover:bg-yellow-300"
                                                 }, React.createElement(PlusIcon, { className: "w-8 h-8 stroke-[3]" }))
                                             )
                                         );
