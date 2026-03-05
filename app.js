@@ -5376,16 +5376,16 @@ className: "w-full flex-shrink-0 p-6 overflow-y-auto custom-scrollbar flex flex-
                                 React.createElement('h2', { 
                                     className: "text-xl font-black text-white italic tracking-tighter uppercase drop-shadow-2xl text-center" 
                                 }, '✨ 加購'),
-                                React.createElement('div', { className: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3" },
+                                React.createElement('div', { className: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3" },
                                     addons.filter(a => !a.isHidden && a.isAvailable !== false).slice(0, 6).map(addon => {
                                         const selectedAddon = selectedAddons.find(sa => sa.id === addon.id);
                                         const currentQuantity = selectedAddon?.quantity || 0;
                                         return React.createElement('div', {
                                             key: addon.id,
-    className: `p-5 rounded-xl border-4 transition-all ${
-        currentQuantity > 0
-            ? 'border-green-500 bg-green-900/50 shadow-2xl'
-            : 'border-slate-700 bg-slate-800/50'
+                                            className: `p-5 rounded-xl border-4 transition-all ${
+                                                currentQuantity > 0
+                                                    ? 'border-green-500 bg-green-900/50 shadow-2xl'
+                                                    : 'border-slate-700 bg-slate-800/50'
                                             }`
                                         },
                                             // 加購名稱 - 再縮小50%（從 text-2xl 改為 text-xl）
