@@ -5389,9 +5389,8 @@ className: "w-full flex-shrink-0 p-6 overflow-y-auto custom-scrollbar flex flex-
                                             }`
                                         },
                                             // 加購名稱 - 再縮小50%（從 text-2xl 改為 text-xl）
-                                            React.createElement('p', { className: "text-xl font-black text-white mb-1" }, addon.name),
-                                            // 價格 - 縮小20%（從 text-4xl 改為 text-3xl）
-                                            React.createElement('p', { className: "text-3xl font-bold text-yellow-400 mb-5" }, `+$${addon.price}`),
+                                            React.createElement('p', { className: "text-base sm:text-lg font-black text-white mb-1" }, addon.name),
+React.createElement('p', { className: "text-xl sm:text-2xl font-bold text-yellow-400 mb-3" }, `+$${addon.price}`),
                                             React.createElement('div', { className: "flex items-center justify-center gap-4" },
                                                 React.createElement('button', {
                                                     onClick: () => updateAddonQuantity(addon, -1),
